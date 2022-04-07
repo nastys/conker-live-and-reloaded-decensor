@@ -6,6 +6,7 @@ For now, only a few decensored English scripts are included, as a proof of conce
 
 UPDATE: string editor: https://github.com/nastys/CAFFTextEditor/releases
 
+ANOTHER UPDATE - by Vaani: uncensored every text script in the *SINGLE PLAYER* game (that I could find. May have missed some)
 
 ## Downloading and installing decensored audio files
 
