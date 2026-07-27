@@ -8,11 +8,8 @@ UPDATE: string editor: https://github.com/nastys/CAFFTextEditor/releases
 
 ANOTHER UPDATE - by Vaani: uncensored every text script in the *SINGLE PLAYER* game (that I could find. May have missed some)
 
-## Downloading and installing decensored audio files
+## Downloading and installing the decensored audio files
 
 NOTE: Make sure to delete any cached files in your Xbox's X:\ partition; otherwise, you will not hear the decensored audio.
 
-To properly download the audio files, you MUST install Git LFS: https://git-lfs.github.com/
-Then clone this repository with ``git lfs clone``.
-
-DO NOT DOWNLOAD THE "CODE" DIRECTLY (i.e. as a .zip file)
+After cloning the repository, run "decompress_voicebanks.bat" (Windows 10/11) before copying the files.
