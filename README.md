@@ -12,4 +12,4 @@ ANOTHER UPDATE - by Vaani: uncensored every text script in the *SINGLE PLAYER* g
 
 NOTE: Make sure to delete any cached files in your Xbox's X:\ partition; otherwise, you will not hear the decensored audio.
 
-After cloning the repository, run "decompress_voicebanks.bat" (Windows 10/11) before copying the files.
+After cloning the repository, run "decompress_voicebanks.bat" (Windows 10/11) or "decompress_voicebanks.sh" (Linux/macOS) before copying the files.
