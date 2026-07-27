@@ -1,0 +1,35 @@
+name: Deploy discpatch contents
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  process-files:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install 7-Zip
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y p7zip-full
+
+      - name: Run Decompression Script
+        run: |
+          chmod +x decompress_voicebanks.sh
+          echo "" | ./decompress_voicebanks.sh
+
+      - name: Compress discpatch contents to 7z
+        run: |
+          cd discpatch
+          7z a -t7z -mx=7 -ms=on ../conker-decensor-latest-git.7z *
+
+      - name: Upload 7z Archive Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: conker-decensor-latest-git
+          path: conker-decensor-latest-git.7z
