@@ -16,3 +16,5 @@ for /R "%ROOT_DIR%" %%F in (default.bin) do (
     )
 )
 endlocal
+
+pause

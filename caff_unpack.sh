@@ -10,3 +10,7 @@ find "$ROOT_DIR" -type f -name "default.bin" -print0 | while IFS= read -r -d '' 
     echo "Unpacking: $bin_file -> $toml_file"
     python "$TOOL_PATH" unpack "$bin_file" "$toml_file"
 done
+
+echo ""
+read -n 1 -s -r -p "Press any key to continue..."
+echo ""

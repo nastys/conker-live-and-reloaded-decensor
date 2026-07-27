@@ -1,6 +1,7 @@
 import sys
 import struct
 import json
+import re
 
 try:
     import tomllib
@@ -19,90 +20,146 @@ class CaffTomlConverter:
         if lsbl_idx == -1:
             raise ValueError("Invalid file: missing LSBL block.")
 
-        # 1. Extract UTF-16 Key preceding LSBL block
-        key_bytes = bin_bytes[lsbl_idx - 42 : lsbl_idx - 2]
-        key = key_bytes.decode("utf-16le", errors="ignore").rstrip("\x00")
+        # Read number of strings in block
+        string_count = struct.unpack("<I", bin_bytes[lsbl_idx + 32 : lsbl_idx + 36])[0]
 
-        # 2. Extract Dialogue String
-        char_count_offset = lsbl_idx + 44
-        char_count = struct.unpack("<I", bin_bytes[char_count_offset:char_count_offset + 4])[0]
-        text_start = lsbl_idx + 48
-        text_byte_len = (char_count - 1) * 2  # Exclude null terminator
-        dialogue_text = bin_bytes[text_start : text_start + text_byte_len].decode("utf-16le")
-
-        # 3. Extract Audio Metadata & Build Path
-        remaining = bin_bytes[text_start + text_byte_len + 2 :]
+        # 1. Locate all UTF-16LE dialogue strings following LSBL
+        str_pattern = re.compile(b'(?:[\x20-\x7E]\x00){2,}')
+        dialogue_strings = []
+        scan_offset = lsbl_idx + 48
         
+        for match in str_pattern.finditer(bin_bytes[scan_offset:]):
+            start = scan_offset + match.start()
+            end = scan_offset + match.end()
+            raw_bytes = bin_bytes[start:end]
+            decoded = raw_bytes.decode("utf-16le", errors="ignore")
+            
+            # Filter out key names
+            if not decoded.startswith("cutscene_") and not decoded == "EmptyString":
+                dialogue_strings.append((start, end - start, decoded))
+            
+            if len(dialogue_strings) == string_count:
+                break
+
+        # 2. Locate ASCII key names
+        keys = []
+        ascii_region = bin_bytes[scan_offset:]
+        key_matches = re.findall(b'(?:cutscene_[A-Za-z0-9_]+|EmptyString)', ascii_region)
+        
+        for k in key_matches:
+            decoded_key = k.decode("ascii")
+            if decoded_key not in keys:
+                keys.append(decoded_key)
+            if len(keys) == string_count:
+                break
+
+        while len(keys) < len(dialogue_strings):
+            keys.append(f"string_key_{len(keys)}")
+
+        # 3. Extract Build Path & Script metadata
+        remaining = bin_bytes[scan_offset:]
         audio_meta = ""
         audio_start = remaining.find(b";")
         if audio_start != -1:
             audio_end = remaining.find(b"\x00", audio_start)
-            audio_meta = remaining[audio_start:audio_end].decode("ascii", errors="ignore")
+            if audio_end != -1:
+                audio_meta = remaining[audio_start:audio_end].decode("ascii", errors="ignore")
 
         build_path = ""
         path_start = remaining.find(b":\\")
         if path_start != -1:
             path_start_offset = path_start - 1
             path_end = remaining.find(b"\x00", path_start_offset)
-            build_path = remaining[path_start_offset:path_end].decode("ascii", errors="ignore")
+            if path_end != -1:
+                build_path = remaining[path_start_offset:path_end].decode("ascii", errors="ignore")
 
-        # Embed original binary as hex
-        template_hex = bin_bytes.hex()
+        # Construct TOML
+        toml_lines = [
+            f"[meta]",
+            f"build_path = {json.dumps(build_path)}",
+            "",
+            f"[script]",
+            f"audio_meta = {json.dumps(audio_meta)}",
+            ""
+        ]
 
-        return f"""[meta]
-key = {json.dumps(key)}
-build_path = {json.dumps(build_path)}
+        for i, (_, _, text_val) in enumerate(dialogue_strings):
+            key_val = keys[i] if i < len(keys) else f"key_{i}"
+            toml_lines.append("[[entries]]")
+            toml_lines.append(f"key = {json.dumps(key_val)}")
+            toml_lines.append(f"text = {json.dumps(text_val)}")
+            toml_lines.append("")
 
-[script]
-audio_meta = {json.dumps(audio_meta)}
+        toml_lines.append("[binary]")
+        toml_lines.append(f'template_hex = "{bin_bytes.hex()}"\n')
 
-[dialogue]
-text = {json.dumps(dialogue_text)}
-
-[binary]
-template_hex = "{template_hex}"
-"""
+        return "\n".join(toml_lines)
 
     @staticmethod
     def toml_to_bin(toml_str: str) -> bytes:
         parsed = tomllib.loads(toml_str)
-        new_text = parsed.get("dialogue", {}).get("text", "")
         template_hex = parsed.get("binary", {}).get("template_hex", "")
         
         if not template_hex:
             raise ValueError("TOML file missing [binary] template_hex field.")
 
         raw_data = bytearray(bytes.fromhex(template_hex))
+        entries = parsed.get("entries", [])
 
         lsbl_idx = raw_data.find(b"LSBL")
         if lsbl_idx == -1:
-            raise ValueError("Invalid template binary inside TOML: missing LSBL block.")
+            raise ValueError("Invalid template binary: missing LSBL block.")
 
-        char_count_offset = lsbl_idx + 44
-        old_char_count = struct.unpack("<I", raw_data[char_count_offset:char_count_offset + 4])[0]
-        old_text_byte_len = old_char_count * 2  # Including null terminator
+        str_pattern = re.compile(b'(?:[\x20-\x7E]\x00){2,}')
+        scan_offset = lsbl_idx + 48
+        
+        matches = []
+        for match in str_pattern.finditer(raw_data[scan_offset:]):
+            start = scan_offset + match.start()
+            end = scan_offset + match.end()
+            raw_bytes = raw_data[start:end]
+            decoded = raw_bytes.decode("utf-16le", errors="ignore")
+            
+            if not decoded.startswith("cutscene_") and not decoded == "EmptyString":
+                matches.append((start, end - start))
+            
+            if len(matches) == len(entries):
+                break
 
-        # Build new text payload
-        new_encoded = new_text.encode("utf-16le") + b"\x00\x00"
-        new_char_count = len(new_text) + 1
+        # Process replacement in reverse order to preserve offsets
+        for i in reversed(range(min(len(entries), len(matches)))):
+            start_off, old_byte_len = matches[i]
+            new_text = entries[i].get("text", "")
+            new_encoded = new_text.encode("utf-16le")
 
-        # Update char count prefix
-        struct.pack_into("<I", raw_data, char_count_offset, new_char_count)
-
-        # Update block payload length field
-        payload_len_offset = lsbl_idx + 16
-        old_payload_len = struct.unpack("<I", raw_data[payload_len_offset:payload_len_offset + 4])[0]
-        length_diff = len(new_encoded) - old_text_byte_len
-        struct.pack_into("<I", raw_data, payload_len_offset, old_payload_len + length_diff)
-
-        # Splice new text bytes into binary data
-        text_start = lsbl_idx + 48
-        raw_data[text_start : text_start + old_text_byte_len] = new_encoded
+            if len(new_encoded) == old_byte_len:
+                raw_data[start_off : start_off + old_byte_len] = new_encoded
+            else:
+                raw_data[start_off : start_off + old_byte_len] = new_encoded
+                
+                if len(entries) == 1:
+                    char_count_offset = start_off - 4
+                    new_char_count = len(new_text) + 1
+                    struct.pack_into("<I", raw_data, char_count_offset, new_char_count)
 
         return bytes(raw_data)
 
+    @staticmethod
+    def verify_lossless(original_bytes: bytes, toml_str: str) -> tuple[bool, str]:
+        """In-memory roundtrip validation test."""
+        repacked_bytes = CaffTomlConverter.toml_to_bin(toml_str)
+        
+        if original_bytes == repacked_bytes:
+            return True, "100% byte-for-byte match"
 
-# --- Command-Line Interface ---
+        # Locate first byte mismatch for diagnostics
+        min_len = min(len(original_bytes), len(repacked_bytes))
+        diff_offset = next((i for i in range(min_len) if original_bytes[i] != repacked_bytes[i]), min_len)
+        
+        return False, f"Mismatch detected at offset 0x{diff_offset:X} (Original: {len(original_bytes)} bytes, Repacked: {len(repacked_bytes)} bytes)"
+
+
+# --- CLI ---
 if __name__ == "__main__":
     if len(sys.argv) < 4:
         print("Usage:")
@@ -113,18 +170,38 @@ if __name__ == "__main__":
     mode = sys.argv[1].lower()
 
     if mode == "unpack":
-        with open(sys.argv[2], "rb") as f:
-            data = f.read()
-        with open(sys.argv[3], "w", encoding="utf-8") as f:
-            f.write(CaffTomlConverter.bin_to_toml(data))
-        print(f"[SUCCESS] Exported {sys.argv[2]} -> {sys.argv[3]}")
+        in_bin_path = sys.argv[2]
+        out_toml_path = sys.argv[3]
+
+        with open(in_bin_path, "rb") as f:
+            original_data = f.read()
+
+        # 1. Generate TOML in memory
+        generated_toml = CaffTomlConverter.bin_to_toml(original_data)
+
+        # 2. In-memory roundtrip check
+        is_lossless, status_msg = CaffTomlConverter.verify_lossless(original_data, generated_toml)
+        if not is_lossless:
+            print(f"[ERROR] Lossless verification failed for '{in_bin_path}'!")
+            print(f"        Details: {status_msg}")
+            sys.exit(1)
+
+        # 3. Write TOML to disk only after verification passes
+        with open(out_toml_path, "w", encoding="utf-8") as f:
+            f.write(generated_toml)
+
+        print(f"[SUCCESS] Verified ({status_msg}) & Exported {in_bin_path} -> {out_toml_path}")
 
     elif mode == "pack":
-        with open(sys.argv[2], "r", encoding="utf-8") as f:
+        in_toml_path = sys.argv[2]
+        out_bin_path = sys.argv[3]
+
+        with open(in_toml_path, "r", encoding="utf-8") as f:
             toml_content = f.read()
 
         modded_bin = CaffTomlConverter.toml_to_bin(toml_content)
         
-        with open(sys.argv[3], "wb") as f:
+        with open(out_bin_path, "wb") as f:
             f.write(modded_bin)
-        print(f"[SUCCESS] Repacked {sys.argv[2]} -> {sys.argv[3]}")
+
+        print(f"[SUCCESS] Repacked {in_toml_path} -> {out_bin_path}")
