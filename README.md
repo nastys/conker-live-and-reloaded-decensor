@@ -2,14 +2,30 @@
 
 A lot of work and research has yet to be done, including proper reverse-engineering the CAFF version used by the game (for the scripts), decensoring them, synthesizing the missing (beeped) audio (using the official uncensored audio where possible), repacking the audio files.
 
-For now, only a few decensored English scripts are included, as a proof of concept. These were manually decensored with a hex editor.
+UPDATE - by Vaani: uncensored every text script in the *SINGLE PLAYER* game (that I could find. May have missed some)
 
-UPDATE: string editor: https://github.com/nastys/CAFFTextEditor/releases
-
-ANOTHER UPDATE - by Vaani: uncensored every text script in the *SINGLE PLAYER* game (that I could find. May have missed some)
+Decensored text so far:
+- Every script in English
 
 ## Downloading and installing the decensored audio files
 
+After cloning the repository, run "decompress_voicebanks.bat" (Windows 10/11) or "decompress_voicebanks.sh" (Linux/macOS) before copying the files. See the [wiki](https://github.com/nastys/conker-live-and-reloaded-decensor/wiki) for further instructions for your platform.
+
 NOTE: Make sure to delete any cached files in your Xbox's X:\ partition; otherwise, you will not hear the decensored audio.
 
-After cloning the repository, run "decompress_voicebanks.bat" (Windows 10/11) or "decompress_voicebanks.sh" (Linux/macOS) before copying the files.
+Decensored audio so far:
+- The Great Mighty Poo song
+
+## Editing
+
+### CAFF text files ("default.bin")
+
+You can use a hex editor, the legacy [CAFFTextEditor](https://github.com/nastys/CAFFTextEditor/releases), or the experimental, vibe-coded caff_tool.py provided in this repo (if you need batch processing).
+
+### XWB voicebanks
+
+Some useful tools:
+http://aluigi.altervista.org/papers/unxwb.zip
+https://archive.org/details/xbox-sdks (version 5849)
+
+If you are working on a specific file, do not run "decompress_voicebanks" (to avoid recompressing everything later with "compress_voicebanks"), and only commit the *.xwb.zip file you have modified.
