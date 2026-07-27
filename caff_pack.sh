@@ -8,7 +8,7 @@ find "$ROOT_DIR" -type f -name "default.toml" -print0 | while IFS= read -r -d ''
     dir=$(dirname "$toml_file")
     bin_file="$dir/default.bin"
     echo "Packing: $toml_file -> $bin_file"
-    python "$TOOL_PATH" pack "$toml_file" "$bin_file"
+    python "$TOOL_PATH" pack "$toml_file" "$bin_file"  --safe
 done
 
 echo ""

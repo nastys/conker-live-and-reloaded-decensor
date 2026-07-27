@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import struct
 import sys
@@ -27,7 +28,6 @@ class CaffTomlConverter:
         )[0]
 
         # 1. Locate all UTF-16LE dialogue strings following LSBL
-        # Matches any non-zero low byte followed by 0x00 high byte (UTF-16LE)
         str_pattern = re.compile(b"(?:[^\x00]\x00){2,}")
         dialogue_strings = []
         scan_offset = lsbl_idx + 48
@@ -160,6 +160,82 @@ class CaffTomlConverter:
         return bytes(raw_data)
 
     @staticmethod
+    def pack_safe(toml_path: str, target_bin_path: str) -> bytes:
+        """Safe mode string patching directly into an existing target .bin file."""
+        if not os.path.exists(target_bin_path):
+            print(f"[WARNING] Target binary file not found: '{target_bin_path}'")
+            input("Execution paused. Press Enter to exit...")
+            sys.exit(1)
+
+        with open(toml_path, "r", encoding="utf-8") as f:
+            parsed = tomllib.loads(f.read())
+
+        with open(target_bin_path, "rb") as f:
+            raw_data = bytearray(f.read())
+
+        lsbl_idx = raw_data.find(b"LSBL")
+        if lsbl_idx == -1:
+            print(
+                f"[WARNING] Invalid binary format: missing LSBL block in '{target_bin_path}'"
+            )
+            input("Execution paused. Press Enter to exit...")
+            sys.exit(1)
+
+        str_pattern = re.compile(b"(?:[^\x00]\x00){2,}")
+        scan_offset = lsbl_idx + 48
+        entries = parsed.get("entries", [])
+
+        matches = []
+        for match in str_pattern.finditer(raw_data[scan_offset:]):
+            start = scan_offset + match.start()
+            end = scan_offset + match.end()
+            raw_bytes = raw_data[start:end]
+            decoded = raw_bytes.decode("utf-16le", errors="ignore")
+
+            if (
+                not decoded.startswith("cutscene_")
+                and not decoded == "EmptyString"
+            ):
+                matches.append((start, end - start))
+
+            if len(matches) == len(entries):
+                break
+
+        if len(matches) < len(entries):
+            print(
+                f"[WARNING] TOML contains {len(entries)} entries, but only {len(matches)} matching string locations were found in '{target_bin_path}'."
+            )
+            input("Execution paused. Press Enter to exit...")
+            sys.exit(1)
+
+        for i, (start_off, old_byte_len) in enumerate(matches):
+            new_text = entries[i].get("text", "")
+            key_name = entries[i].get("key", f"Entry #{i+1}")
+            new_encoded = new_text.encode("utf-16le")
+
+            # Check if string exceeds allocated byte capacity
+            if len(new_encoded) > old_byte_len:
+                print(
+                    f"\n[WARNING] String is too large for existing buffer space!"
+                )
+                print(f"          Key/Entry: '{key_name}'")
+                print(
+                    f"          New text size : {len(new_encoded)} bytes (Text: \"{new_text}\")"
+                )
+                print(f"          Original max  : {old_byte_len} bytes")
+                input("\nExecution paused. Press Enter to exit...")
+                sys.exit(1)
+
+            # Pad smaller strings with NULL bytes to keep exact original size
+            padding_len = old_byte_len - len(new_encoded)
+            padded_bytes = new_encoded + (b"\x00" * padding_len)
+
+            # Overwrite string bytes only
+            raw_data[start_off : start_off + old_byte_len] = padded_bytes
+
+        return bytes(raw_data)
+
+    @staticmethod
     def verify_lossless(
         original_bytes: bytes, toml_str: str
     ) -> tuple[bool, str]:
@@ -187,25 +263,26 @@ class CaffTomlConverter:
 
 # --- CLI ---
 if __name__ == "__main__":
-    if len(sys.argv) < 4:
+    is_safe = "--safe" in sys.argv
+    cli_args = [arg for arg in sys.argv[1:] if arg != "--safe"]
+
+    if len(cli_args) < 2:
         print("Usage:")
-        print("  Unpack: python caff_tool.py unpack input.bin output.toml")
-        print("  Pack:   python caff_tool.py pack input.toml output.bin")
+        print("  Unpack: python caff_tool.py unpack input.bin [output.toml]")
+        print("  Pack:   python caff_tool.py pack input.toml [target.bin] [output.bin] [--safe]")
         sys.exit(1)
 
-    mode = sys.argv[1].lower()
+    mode = cli_args[0].lower()
 
     if mode == "unpack":
-        in_bin_path = sys.argv[2]
-        out_toml_path = sys.argv[3]
+        in_bin_path = cli_args[1]
+        out_toml_path = cli_args[2] if len(cli_args) > 2 else os.path.splitext(in_bin_path)[0] + ".toml"
 
         with open(in_bin_path, "rb") as f:
             original_data = f.read()
 
-        # 1. Generate TOML in memory
         generated_toml = CaffTomlConverter.bin_to_toml(original_data)
 
-        # 2. In-memory roundtrip check
         is_lossless, status_msg = CaffTomlConverter.verify_lossless(
             original_data, generated_toml
         )
@@ -214,7 +291,6 @@ if __name__ == "__main__":
             print(f"        Details: {status_msg}")
             sys.exit(1)
 
-        # 3. Write TOML to disk only after verification passes
         with open(out_toml_path, "w", encoding="utf-8") as f:
             f.write(generated_toml)
 
@@ -223,15 +299,28 @@ if __name__ == "__main__":
         )
 
     elif mode == "pack":
-        in_toml_path = sys.argv[2]
-        out_bin_path = sys.argv[3]
+        in_toml_path = cli_args[1]
 
-        with open(in_toml_path, "r", encoding="utf-8") as f:
-            toml_content = f.read()
+        if is_safe:
+            # If target .bin is explicitly passed, use it; otherwise infer from .toml filename
+            target_bin = cli_args[2] if len(cli_args) > 2 else os.path.splitext(in_toml_path)[0] + ".bin"
+            out_bin_path = cli_args[3] if len(cli_args) > 3 else target_bin
 
-        modded_bin = CaffTomlConverter.toml_to_bin(toml_content)
+            modded_bin = CaffTomlConverter.pack_safe(in_toml_path, target_bin)
 
-        with open(out_bin_path, "wb") as f:
-            f.write(modded_bin)
+            with open(out_bin_path, "wb") as f:
+                f.write(modded_bin)
 
-        print(f"[SUCCESS] Repacked {in_toml_path} -> {out_bin_path}")
+            print(f"[SUCCESS] (SAFE) Overwrote strings in {target_bin} -> Saved to {out_bin_path}")
+        else:
+            out_bin_path = cli_args[2] if len(cli_args) > 2 else os.path.splitext(in_toml_path)[0] + ".bin"
+
+            with open(in_toml_path, "r", encoding="utf-8") as f:
+                toml_content = f.read()
+
+            modded_bin = CaffTomlConverter.toml_to_bin(toml_content)
+
+            with open(out_bin_path, "wb") as f:
+                f.write(modded_bin)
+
+            print(f"[SUCCESS] Repacked {in_toml_path} -> {out_bin_path}")

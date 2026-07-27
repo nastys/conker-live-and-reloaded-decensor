@@ -12,7 +12,7 @@ for /R "%ROOT_DIR%" %%F in (default.toml) do (
         set "DIR_PATH=%%~dpF"
         set "BIN_PATH=!DIR_PATH!default.bin"
         echo Packing: "!TOML_PATH!" -^> "!BIN_PATH!"
-        python "%TOOL_PATH%" pack "!TOML_PATH!" "!BIN_PATH!"
+        python "%TOOL_PATH%" pack "!TOML_PATH!" "!BIN_PATH!"  --safe
     )
 )
 endlocal
