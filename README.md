@@ -5,7 +5,8 @@ A lot of work and research has yet to be done, including proper reverse-engineer
 UPDATE - by Vaani: uncensored every text script in the *SINGLE PLAYER* game (that I could find. May have missed some)
 
 Decensored text so far:
-- Every script in English
+- Every script in English (by Vaani)
+- Every script in Italian (by nastys)
 
 ## Downloading and installing the decensored audio files
 
