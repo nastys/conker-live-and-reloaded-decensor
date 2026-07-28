@@ -7,6 +7,7 @@ UPDATE - by Vaani: uncensored every text script in the *SINGLE PLAYER* game (tha
 Decensored text so far:
 - Every script in English (by Vaani)
 - Every script in Italian (by nastys)
+- Every script in French (by nastys)
 
 ## Downloading and installing the decensored audio files
 
