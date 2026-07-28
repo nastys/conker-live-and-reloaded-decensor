@@ -8,6 +8,7 @@ Decensored text so far:
 - Every script in English (by Vaani)
 - Every script in Italian (by nastys)
 - Every script in French (by nastys)
+- Every script in Spanish (by Theconker64)
 
 ## Downloading and installing the decensored audio files
 
