@@ -88,18 +88,20 @@ class CaffTomlConverter:
 
         # Construct TOML
         toml_lines = [
-            f"[meta]",
+            "[meta]",
             f"build_path = {json.dumps(build_path)}",
             "",
-            f"[script]",
+            "[script]",
             f"audio_meta = {json.dumps(audio_meta)}",
             "",
         ]
 
-        for i, (_, _, text_val) in enumerate(dialogue_strings):
+        for i, (offset_val, len_val, text_val) in enumerate(dialogue_strings):
             key_val = keys[i] if i < len(keys) else f"key_{i}"
             toml_lines.append("[[entries]]")
             toml_lines.append(f"key = {json.dumps(key_val)}")
+            toml_lines.append(f"offset = {offset_val}")
+            toml_lines.append(f"max_bytes = {len_val}")
             toml_lines.append(f"text = {json.dumps(text_val)}")
             toml_lines.append("")
 
@@ -107,6 +109,40 @@ class CaffTomlConverter:
         toml_lines.append(f'template_hex = "{bin_bytes.hex()}"\n')
 
         return "\n".join(toml_lines)
+
+    @staticmethod
+    def _get_string_matches(raw_data: bytearray, entries: list) -> list:
+        """Utility to retrieve (offset, max_bytes) tuples from TOML metadata or via regex fallback."""
+        matches = []
+        has_metadata = all("offset" in e and "max_bytes" in e for e in entries)
+
+        if has_metadata and len(entries) > 0:
+            for entry in entries:
+                matches.append((entry["offset"], entry["max_bytes"]))
+        else:
+            lsbl_idx = raw_data.find(b"LSBL")
+            if lsbl_idx == -1:
+                raise ValueError("Invalid template binary: missing LSBL block.")
+
+            str_pattern = re.compile(b"(?:[^\x00]\x00){2,}")
+            scan_offset = lsbl_idx + 48
+
+            for match in str_pattern.finditer(raw_data[scan_offset:]):
+                start = scan_offset + match.start()
+                end = scan_offset + match.end()
+                raw_bytes = raw_data[start:end]
+                decoded = raw_bytes.decode("utf-16le", errors="ignore")
+
+                if (
+                    not decoded.startswith("cutscene_")
+                    and not decoded == "EmptyString"
+                ):
+                    matches.append((start, end - start))
+
+                if len(matches) == len(entries):
+                    break
+
+        return matches
 
     @staticmethod
     def toml_to_bin(toml_str: str) -> bytes:
@@ -118,29 +154,7 @@ class CaffTomlConverter:
 
         raw_data = bytearray(bytes.fromhex(template_hex))
         entries = parsed.get("entries", [])
-
-        lsbl_idx = raw_data.find(b"LSBL")
-        if lsbl_idx == -1:
-            raise ValueError("Invalid template binary: missing LSBL block.")
-
-        str_pattern = re.compile(b"(?:[^\x00]\x00){2,}")
-        scan_offset = lsbl_idx + 48
-
-        matches = []
-        for match in str_pattern.finditer(raw_data[scan_offset:]):
-            start = scan_offset + match.start()
-            end = scan_offset + match.end()
-            raw_bytes = raw_data[start:end]
-            decoded = raw_bytes.decode("utf-16le", errors="ignore")
-
-            if (
-                not decoded.startswith("cutscene_")
-                and not decoded == "EmptyString"
-            ):
-                matches.append((start, end - start))
-
-            if len(matches) == len(entries):
-                break
+        matches = CaffTomlConverter._get_string_matches(raw_data, entries)
 
         # Process replacement in reverse order to preserve offsets
         for i in reversed(range(min(len(entries), len(matches)))):
@@ -160,50 +174,36 @@ class CaffTomlConverter:
         return bytes(raw_data)
 
     @staticmethod
-    def pack_safe(toml_path: str, target_bin_path: str) -> bytes:
-        """Safe mode string patching directly into an existing target .bin file."""
-        if not os.path.exists(target_bin_path):
-            print(f"[WARNING] Target binary file not found: '{target_bin_path}'")
-            input("Execution paused. Press Enter to exit...")
-            sys.exit(1)
-
+    def pack_safe(toml_path: str, target_bin_path: str = None) -> bytes:
+        """Safe mode string patching directly into binary data."""
         with open(toml_path, "r", encoding="utf-8") as f:
             parsed = tomllib.loads(f.read())
 
-        with open(target_bin_path, "rb") as f:
-            raw_data = bytearray(f.read())
+        # Determine binary source: target file on disk or embedded template_hex fallback
+        raw_data = None
+        if target_bin_path and os.path.exists(target_bin_path):
+            with open(target_bin_path, "rb") as f:
+                raw_data = bytearray(f.read())
+        else:
+            template_hex = parsed.get("binary", {}).get("template_hex", "")
+            if template_hex:
+                raw_data = bytearray(bytes.fromhex(template_hex))
+            else:
+                target_desc = (
+                    f"'{target_bin_path}'" if target_bin_path else "target .bin"
+                )
+                print(
+                    f"[WARNING] Could not find {target_desc} and TOML lacks template_hex field."
+                )
+                input("Execution paused. Press Enter to exit...")
+                sys.exit(1)
 
-        lsbl_idx = raw_data.find(b"LSBL")
-        if lsbl_idx == -1:
-            print(
-                f"[WARNING] Invalid binary format: missing LSBL block in '{target_bin_path}'"
-            )
-            input("Execution paused. Press Enter to exit...")
-            sys.exit(1)
-
-        str_pattern = re.compile(b"(?:[^\x00]\x00){2,}")
-        scan_offset = lsbl_idx + 48
         entries = parsed.get("entries", [])
-
-        matches = []
-        for match in str_pattern.finditer(raw_data[scan_offset:]):
-            start = scan_offset + match.start()
-            end = scan_offset + match.end()
-            raw_bytes = raw_data[start:end]
-            decoded = raw_bytes.decode("utf-16le", errors="ignore")
-
-            if (
-                not decoded.startswith("cutscene_")
-                and not decoded == "EmptyString"
-            ):
-                matches.append((start, end - start))
-
-            if len(matches) == len(entries):
-                break
+        matches = CaffTomlConverter._get_string_matches(raw_data, entries)
 
         if len(matches) < len(entries):
             print(
-                f"[WARNING] TOML contains {len(entries)} entries, but only {len(matches)} matching string locations were found in '{target_bin_path}'."
+                f"[WARNING] TOML contains {len(entries)} entries, but only {len(matches)} matching string locations were found."
             )
             input("Execution paused. Press Enter to exit...")
             sys.exit(1)
@@ -226,7 +226,7 @@ class CaffTomlConverter:
                 input("\nExecution paused. Press Enter to exit...")
                 sys.exit(1)
 
-            # Pad smaller strings with NULL bytes to keep exact original size
+            # Pad smaller strings with NULL bytes to maintain exact length
             padding_len = old_byte_len - len(new_encoded)
             padded_bytes = new_encoded + (b"\x00" * padding_len)
 
@@ -276,7 +276,11 @@ if __name__ == "__main__":
 
     if mode == "unpack":
         in_bin_path = cli_args[1]
-        out_toml_path = cli_args[2] if len(cli_args) > 2 else os.path.splitext(in_bin_path)[0] + ".toml"
+        out_toml_path = (
+            cli_args[2]
+            if len(cli_args) > 2
+            else os.path.splitext(in_bin_path)[0] + ".toml"
+        )
 
         with open(in_bin_path, "rb") as f:
             original_data = f.read()
@@ -302,8 +306,8 @@ if __name__ == "__main__":
         in_toml_path = cli_args[1]
 
         if is_safe:
-            # If target .bin is explicitly passed, use it; otherwise infer from .toml filename
-            target_bin = cli_args[2] if len(cli_args) > 2 else os.path.splitext(in_toml_path)[0] + ".bin"
+            default_bin = os.path.splitext(in_toml_path)[0] + ".bin"
+            target_bin = cli_args[2] if len(cli_args) > 2 else default_bin
             out_bin_path = cli_args[3] if len(cli_args) > 3 else target_bin
 
             modded_bin = CaffTomlConverter.pack_safe(in_toml_path, target_bin)
@@ -311,9 +315,15 @@ if __name__ == "__main__":
             with open(out_bin_path, "wb") as f:
                 f.write(modded_bin)
 
-            print(f"[SUCCESS] (SAFE) Overwrote strings in {target_bin} -> Saved to {out_bin_path}")
+            print(
+                f"[SUCCESS] (SAFE) Overwrote strings in standalone mode -> Saved to {out_bin_path}"
+            )
         else:
-            out_bin_path = cli_args[2] if len(cli_args) > 2 else os.path.splitext(in_toml_path)[0] + ".bin"
+            out_bin_path = (
+                cli_args[2]
+                if len(cli_args) > 2
+                else os.path.splitext(in_toml_path)[0] + ".bin"
+            )
 
             with open(in_toml_path, "r", encoding="utf-8") as f:
                 toml_content = f.read()
