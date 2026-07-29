@@ -28,8 +28,6 @@ You can use a hex editor, the legacy [CAFFTextEditor](https://github.com/nastys/
 
 ### XWB voicebanks
 
-Some useful tools:
-http://aluigi.altervista.org/papers/unxwb.zip
-https://archive.org/details/xbox-sdks (version 5849)
+How to modify the voicebanks: https://github.com/nastys/conker-live-and-reloaded-decensor/wiki/Modifying-the-voicebanks
 
 If you are working on a specific file, do not run "decompress_voicebanks" (to avoid recompressing everything later with "compress_voicebanks"), and only commit the *.xwb.zip file you have modified.
