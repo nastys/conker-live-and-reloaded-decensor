@@ -18,7 +18,8 @@ NOTE: Make sure to delete any cached files in your Xbox's X:\ partition; otherwi
 
 Decensored audio so far:
 - The Great Mighty Poo song
-- Death cutscene
+- Greg cutscene
+- Uga Buga
 
 ## Editing
 
