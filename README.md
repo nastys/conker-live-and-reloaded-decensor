@@ -20,6 +20,7 @@ Decensored audio so far:
 - The Great Mighty Poo song
 - Greg cutscene
 - Uga Buga
+- Spooky
 
 ## Editing
 
