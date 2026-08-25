@@ -21,6 +21,7 @@ Decensored audio so far:
 - Greg cutscene
 - Uga Buga
 - Spooky
+- Windy
 
 ## Editing
 
